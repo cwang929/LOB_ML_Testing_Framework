@@ -2,6 +2,7 @@ import numpy
 import scipy
 from scipy.spatial.distance import pdist, squareform
 import matplotlib.pyplot as plt
+import time
 
 import FeatureGenerator
 import Model
@@ -17,41 +18,21 @@ class TestingFramework:
 		self.labelMat = None #note this is ground truth, will not be known to the trainer/model until X timesteps ahead
 		self.predictMat = None
 
-		self.timeFrame = 100
+		self.timeFrame = 4000
 
-		"""
-		self.timeFrame = 100 with the funky gaussian kernel
-		______________
-		Num Errors: 6294
-		Error Rate: 0.344631
-		# 1's predicted: 3737
-		# 0's predicted: 12674
-		# -1's predicted: 1852
-		# 1's predicted but were 1's: 215
-		# 1's predicted but were 0's: 3469
-		# 1's predicted but were -1's: 53
-		# 1 Success Rate: 0.057533
-		# 0's predicted but were 1's: 321
-		# 0's predicted but were 0's: 11745
-		# 0's predicted but were -1's: 608
-		# -1 Success Rate: 0.926700
-		# -1's predicted but were 1's: 70
-		# -1's predicted but were 0's: 1773
-		# -1's predicted but were -1's: 9
-		# -1 Success Rate: 0.004860
-		_______________
-		"""
-		
-		self.neutralQueueSize = 1000
-		self.upQueueSize =  200
-		self.downQueueSize = 200
+		self.neutralQueueSize = 4000
+		self.upQueueSize =  4000
+		self.downQueueSize = 4000
+		self.retrainCount = 1000
 		self.price = 1000000
+		self.useCachedFiles = False
 
-		self.cache = Cache.Cache(self.neutralQueueSize,self.upQueueSize,self.downQueueSize,self.timeFrame)
+		self.cache = Cache.Cache(self.neutralQueueSize,self.upQueueSize,self.downQueueSize,self.timeFrame,self.retrainCount)
 		self.model = Model.Model(None, None, None)
 		self.modelType = modelType
 		self.trainer = Trainer.Trainer(self.modelType)
 		self.trader = Trader.Trader(self.price,self.timeFrame)
+		self.start_time = time.time()
 
 	def errorRate(self,ans, actual):
 		if (len(ans) != len(actual)):
@@ -76,18 +57,9 @@ class TestingFramework:
 
 
 	def main(self):
-		[dataMat, labelMat] = FeatureGenerator.FeatureParser(self.messageBook,self.limitBook,self.timeFrame).parse()
+		[dataMat, labelMat] = FeatureGenerator.FeatureParser(self.messageBook,self.limitBook,self.timeFrame,self.useCachedFiles).parse()
 		print "Generated Features of size: (%d,%d)" % dataMat.shape
-		pairwise_dists = squareform(pdist(dataMat, 'euclidean'))
-		print "huh"
-		self.dataMat = scipy.exp(-pairwise_dists**2 / 1**2)#dataMat
-		print "whut"
 		self.labelMat = labelMat
-
-		countDict = dict()
-		countDict[0] = 0
-		countDict[1] = 0
-		countDict[-1] = 0
 
 		count = 0
 
@@ -96,18 +68,19 @@ class TestingFramework:
 		for obs in dataMat: #an observation is a row in the dataMat
 			self.cache.add(obs)
 			if self.cache.needUpdate():
-				#print "huh"
+				print "huh"
 				self.model = self.trainer.train(self.cache.getData())
 			prediction = self.model.predict(obs)
 			self.predictMat[count,0] = prediction
-			countDict[prediction] += 1
 			count += 1
-			#if count % 100 == 0:
-				#print count, countDict
+			if count % 1000 == 0:
+				print "On Obs: %d" % count
 			self.trader.trade(Trader.DataPt(obs),prediction)
 
-			#self.database.update(decision)
 
+		self.printAnalysis()	
+
+	def printAnalysis(self):
 		lossMat = numpy.mat([[-1, 1, 2], [0, 0, 0], [2, 1, -1]])
 		print "\n\nBegin Analysis\n______________"
 
@@ -174,23 +147,20 @@ class TestingFramework:
 
 		print "Final Value %f" % total_value[-1]
 
+		print("This program took: %f seconds" % (time.time() - self.start_time))
+
 		plt.plot(total_value)
-		#plt.axis([0, len(trade_events), total_value[-1], 1200000])
 		plt.ylabel('Portfolio label')
 		plt.xlabel('Trade events')
 		plt.show()
 
-		#curr = self.cache.getData()
-		#print curr
-		#print curr[0].shape
-		#print curr[1]
-		#print curr[2].shape
 
-		#numpy.savetxt("finalportfoliodata.csv", self.database.outputData(),delimiter=",")
+#messageBook = "GOOG_messagebook_5_small.csv"
+#limitBook = "GOOG_orderbook_5_small.csv"
 
-
-messageBook = "GOOG_2012-06-21_34200000_57600000_messagebook_5.csv"
+messageBook = "GOOG_2012-06-21_34200000_57600000_message_5.csv"
 limitBook = "GOOG_2012-06-21_34200000_57600000_orderbook_5.csv"
 
-q = TestingFramework(messageBook,limitBook,"RandomForest")
+
+q = TestingFramework(messageBook,limitBook,"ExtraTrees")
 q.main()

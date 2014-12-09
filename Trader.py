@@ -45,7 +45,13 @@ class Trader:
         self.last_bid = datapt.bestBidPrice()
       self.last_in_time = self.time
     elif self.IN:
-      if (self.time - self.last_in_time == self.timeFrame) or (self.bought and datapt.bestBidPrice() > self.last_ask) or  (not self.bought and self.last_bid > datapt.bestAskPrice()):
+      if ((self.time - self.last_in_time == self.timeFrame) or (self.bought and datapt.bestBidPrice() > self.last_ask) or (not self.bought and self.last_bid > datapt.bestAskPrice())):
+      #if ((self.time - self.last_in_time == self.timeFrame)
+      #or (datapt.bestBidPrice() > self.last_ask+.5)
+      #or (datapt.bestAskPrice() < self.last_bid-.5)):
+        #
+        #upward or downward loss prevention
+      #if ((self.time - self.last_in_time == self.timeFrame) or (self.bought and datapt.bestBidPrice() > self.last_ask) or  (not self.bought and self.last_bid > datapt.bestAskPrice())):
         #We bought and we've observed a midprice uptick (or 100 timesteps passed). So we sell.
         if self.bought:
           self.ask(datapt)

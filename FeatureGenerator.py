@@ -1,12 +1,20 @@
 import numpy
+import numpy as np
 import random
+import pandas as pd
+
+import os
+import csv
 
 class FeatureParser:
-	def __init__(self, messageFile, lobFile,timeFrame):
+	def __init__(self, messageFile,lobFile,timeFrame,useCachedFiles):
 		self.messageFile = messageFile
 		self.lobFile = lobFile
 		self.indDict = self.getIndDict()
 		self.timeFrame = timeFrame
+		self.useCachedFiles = useCachedFiles
+
+		self.intervals = [1,2,5,10,25,50,100,250,500,1000,2500,5000,10000]
 
 	def getIndDict(self):
 		ret = dict()
@@ -65,14 +73,11 @@ class FeatureParser:
 		return "".join(finalList)
 
 	def removeDuplicateTimes(self,matRaw):
-		#print matRaw[:,0]
-		#print matRaw.shape
-		#print type(matRaw[0,0])
 		[a,b] = numpy.unique(numpy.array(matRaw[:,0]),return_index=True)
 		return matRaw[b,:]
 
 	def addSpreadAndMidPrice(self,matRaw):
-		for i in range(1,6):
+		for i in range(1,2):
 			priceSpread = matRaw[:,self.indDict["ap%d" % i]] - matRaw[:,self.indDict["bp%d" % i]]
 			midPrice = (matRaw[:,self.indDict["ap%d" % i]] + matRaw[:,self.indDict["bp%d" % i]]) / 2.
 
@@ -81,11 +86,11 @@ class FeatureParser:
 		return matRaw
 
 
-	def addMaxMinPriceDifference(self,matRaw):
+	def addMaxMinPriceSpreadDifference(self,matRaw):
 		tempAskMat = numpy.zeros((len(matRaw),1))
 		tempBidMat = numpy.zeros((len(matRaw),1))
 
-		for i in range(1,6):
+		for i in range(1,2):
 			tempAskMat = numpy.hstack((tempAskMat,matRaw[:,self.indDict["ap%d" % i]]))
 			tempBidMat = numpy.hstack((tempBidMat,matRaw[:,self.indDict["bp%d" % i]]))
 
@@ -103,7 +108,7 @@ class FeatureParser:
 		tempAskVolMat = numpy.zeros((len(matRaw),1))
 		tempBidVolMat = numpy.zeros((len(matRaw),1))
 
-		for i in range(1,6):
+		for i in range(1,2):
 			tempAskPriceMat += matRaw[:,self.indDict["ap%d" % i]]
 			tempBidPriceMat += matRaw[:,self.indDict["bp%d" % i]]
 			tempAskVolMat += matRaw[:,self.indDict["as%d" % i]]
@@ -120,7 +125,7 @@ class FeatureParser:
 		tempPriceDiff = numpy.zeros((len(matRaw),1))
 		tempVolDiff = numpy.zeros((len(matRaw),1))
 
-		for i in range(1,6):
+		for i in range(1,2):
 			tempPriceDiff += matRaw[:,self.indDict["ap%d" % i]] - matRaw[:,self.indDict["bp%d" % i]]
 			tempVolDiff += matRaw[:,self.indDict["as%d" % i]] - matRaw[:,self.indDict["bs%d" % i]]
 
@@ -137,7 +142,7 @@ class FeatureParser:
 
 		timeCol = matRaw[:,self.indDict['time']] - shiftMatRaw[:,self.indDict['time']]
 
-		for i in range(1,6):
+		for i in range(1,2):
 			matRaw = numpy.hstack((matRaw, (1.*matRaw[:,self.indDict["ap%d" % i]] - shiftMatRaw[:,self.indDict["ap%d" % i]]) / (timeCol)))
 			matRaw = numpy.hstack((matRaw, (1.*matRaw[:,self.indDict["bp%d" % i]] - shiftMatRaw[:,self.indDict["bp%d" % i]]) / (timeCol)))
 			matRaw = numpy.hstack((matRaw, (1.*matRaw[:,self.indDict["as%d" % i]] - shiftMatRaw[:,self.indDict["as%d" % i]]) / (timeCol)))
@@ -145,38 +150,134 @@ class FeatureParser:
 
 		return matRaw
 
-	"""	
-	def label(self,matRaw):
-		#Policy:
-		#	If there is a ___ exactly after 5 events, then label as ____
-		#		1) Positive Spread Cross -> +1
-		#		2) No Spread Cross -> 0
-		#		3) Negative Spread Cross -> -1
+	def addRollingDerivatives(self,matRaw):
+		for i in range(1,2):
+			for j in self.intervals:
+				ap = matRaw[:,self.indDict["ap%d"%i]]
+				bp = matRaw[:,self.indDict["bp%d"%i]]
+				time = 	matRaw[:,self.indDict["time"]]
 
-		labelMat = numpy.zeros((len(matRaw),1))
+				roll_ap = pd.stats.moments.rolling_apply(ap,j,lambda x: x[-1] - x[0])
+				roll_bp = pd.stats.moments.rolling_apply(bp,j,lambda x: x[-1] - x[0])
+				roll_time = pd.stats.moments.rolling_apply(time,j,lambda x: x[-1] - x[0])
 
-		ap1 = matRaw[:,self.indDict['ap1']] 
-		bp1 = matRaw[:,self.indDict['bp1']]
+				roll_ap[numpy.isnan(roll_ap)] = 0
+				roll_bp[numpy.isnan(roll_bp)] = 0				
+				roll_time[numpy.isnan(roll_time)] = 1				
 
-		timeFrame = self.timeFrame
+				temp1 = roll_ap*1. / roll_time
+				temp2 = roll_bp*1. / roll_time
 
-		for currInd in range(len(matRaw) - timeFrame):
-			futureInd = currInd + timeFrame
-			if ap1[currInd] < bp1[futureInd]:
-				labelMat[currInd] = 1
-			elif bp1[currInd] > ap1[futureInd]:
-				labelMat[currInd] = -1
-			else:
-				labelMat[currInd] = 0
-		#print labelMat
-		print "Num positive cross: %d" % len(numpy.extract(labelMat == 1, labelMat))
-		print "Num no cross: %d" % len(numpy.extract(labelMat == 0, labelMat))
-		print "Num negative cross: %d" % len(numpy.extract(labelMat == -1, labelMat))
+				temp1[numpy.isnan(temp1)] = 0
+				temp2[numpy.isnan(temp2)] = 0
 
-		return labelMat
+
+				matRaw = numpy.hstack((matRaw, temp1))
+				matRaw = numpy.hstack((matRaw, temp2))
+		return matRaw
+	#def addRollingSecondDerivatives(self,matRaw):
+
+	#has NaN's
+	def addRollingVariances(self,matRaw):
+		for i in range(1,2):
+			for j in self.intervals:
+				ap = matRaw[:,self.indDict["ap%d"%i]]
+				bp = matRaw[:,self.indDict["bp%d"%i]]
+
+				roll_ap = pd.stats.moments.rolling_var(ap,j)
+				roll_bp = pd.stats.moments.rolling_var(bp,j)
+
+				#roll_ap[:j] = roll_ap[j]*numpy.ones((j,1))
+				#roll_bp[:j] = roll_bp[j]*numpy.ones((j,1))
+
+				roll_ap[numpy.isnan(roll_ap)] = -1
+				roll_bp[numpy.isnan(roll_bp)] = -1
+
+				matRaw = numpy.hstack((matRaw,roll_ap))
+				matRaw = numpy.hstack((matRaw,roll_bp))
+
+		return matRaw
+
+	def addRollingMedian(self,matRaw):
+		for i in range(1,2):
+			for j in self.intervals:
+				ap = matRaw[:,self.indDict["ap%d"%i]]
+				bp = matRaw[:,self.indDict["bp%d"%i]]
+
+				roll_ap = pd.stats.moments.rolling_median(ap,j)
+				roll_bp = pd.stats.moments.rolling_median(bp,j)
+
+				roll_ap[:j] = ap[:j]
+				roll_bp[:j] = bp[:j]
+
+				matRaw = numpy.hstack((matRaw,roll_ap))
+				matRaw = numpy.hstack((matRaw,roll_bp))
+
+
+		return matRaw
+
+	def addRollingAverages(self,matRaw):
+		#pd.stats.moments.rolling_mean(np.arange(12),6)
+		for i in range(1,2):
+			for j in self.intervals:
+				ap = matRaw[:,self.indDict["ap%d"%i]]
+				bp = matRaw[:,self.indDict["bp%d"%i]]
+
+				roll_ap = pd.stats.moments.rolling_mean(ap,j)
+				roll_bp = pd.stats.moments.rolling_mean(bp,j)
+
+				roll_ap[:j] = ap[:j]
+				roll_bp[:j] = bp[:j]
+
+				matRaw = numpy.hstack((matRaw,roll_ap))
+				matRaw = numpy.hstack((matRaw,roll_bp))
+
+
+		return matRaw
+
+
+	def addRollingMin(self,matRaw):
+		for i in range(1,2):
+			for j in self.intervals:
+				ap = matRaw[:,self.indDict["ap%d"%i]]
+				bp = matRaw[:,self.indDict["bp%d"%i]]
+
+				roll_ap = pd.stats.moments.rolling_min(ap,j)
+				roll_bp = pd.stats.moments.rolling_min(bp,j)
+
+				roll_ap[:j] = roll_ap[j]*numpy.ones((j,1))
+				roll_bp[:j] = roll_bp[j]*numpy.ones((j,1))
+
+				matRaw = numpy.hstack((matRaw,roll_ap))
+				matRaw = numpy.hstack((matRaw,roll_bp))
+
+
+		return matRaw
+
+	def addRollingMax(self,matRaw):
+		for i in range(1,2):
+			for j in self.intervals:
+				ap = matRaw[:,self.indDict["ap%d"%i]]
+				bp = matRaw[:,self.indDict["bp%d"%i]]
+
+				roll_ap = pd.stats.moments.rolling_max(ap,j)
+				roll_bp = pd.stats.moments.rolling_max(bp,j)
+
+				roll_ap[:j] = roll_ap[j]*numpy.ones((j,1))
+				roll_bp[:j] = roll_bp[j]*numpy.ones((j,1))
+
+				matRaw = numpy.hstack((matRaw,roll_ap))
+				matRaw = numpy.hstack((matRaw,roll_bp))
+
+
+		return matRaw
+
+
+
+
+
+	"""Expensive Label"""
 	"""
-
-	
 	def label(self,matRaw):
 		#Policy:
 		#	If there is a ___ sometime before the end of (self.timeFrame) events, then label as ____
@@ -193,6 +294,9 @@ class FeatureParser:
 
 
 		for currInd in range(len(matRaw) - timeFrame):
+			if currInd % 1000 == 0:
+				print currInd
+
 			currLabelUp = False
 			currLabelNeutral = False
 			currLabelDown = False
@@ -216,9 +320,100 @@ class FeatureParser:
 		print "Num negative cross: %d" % len(numpy.extract(labelMat == -1, labelMat))
 
 		return labelMat
-	
+	"""
+
+	"""	
+	def label(self,matRaw):
+		#Policy:
+		#	If there is a ___ sometime before the end of (self.timeFrame) events, then label as ____
+		#		1) Positive Spread Cross -> +1
+		#		2) No Spread Cross -> 0
+		#		3) Negative Spread Cross -> -1
+
+		labelMat = numpy.zeros((len(matRaw),1))
+
+		ap1 = matRaw[:,self.indDict['ap1']] 
+		bp1 = matRaw[:,self.indDict['bp1']]
+
+		timeFrame = self.timeFrame
+
+		for currInd in range(len(matRaw) - timeFrame):
+
+			upCount = sum(ap1[currInd] < bp1[currInd+1:currInd+timeFrame])
+			downCount = sum(bp1[currInd] > ap1[currInd+1:currInd+timeFrame])
+
+			if currInd % 100 == 0:
+				print upCount
+				print downCount
+				print currInd
+
+			upProp,downProp = upCount*1./timeFrame, downCount*1./timeFrame
+			if (upProp > downProp) and upProp > .5:
+				labelMat[currInd] = 1
+			elif (upProp < downProp) and downProp > .5:
+				labelMat[currInd] = -1
+			else:
+				labelMat[currInd] = 0
+
+
+		#print labelMat
+		print "Num positive cross: %d" % len(numpy.extract(labelMat == 1, labelMat))
+		print "Num no cross: %d" % len(numpy.extract(labelMat == 0, labelMat))
+		print "Num negative cross: %d" % len(numpy.extract(labelMat == -1, labelMat))
+
+		return labelMat
+	"""
+	def pseudoRotate(self,l,n):
+		curr = l[:,0].transpose().tolist()[0]
+		curr = curr[n:] + [curr[-1]]*n
+		return curr
+
+	def label(self,matRaw):
+		labelMat = numpy.zeros((len(matRaw),1))
+
+		ap1 = matRaw[:,self.indDict['ap1']] 
+		bp1 = matRaw[:,self.indDict['bp1']]
+
+		timeFrame = self.timeFrame
+		ap1Mat = []
+		bp1Mat = []
+
+		for i in range(1,timeFrame+1):
+			if i % 100 == 0:
+				print "curr rotation %d" % i
+			ap1Mat.append(self.pseudoRotate(ap1,i))
+			bp1Mat.append(self.pseudoRotate(bp1,i))
+
+		ap1Mat = numpy.mat(ap1Mat).transpose()
+		print "Converted ap1Mat"
+		bp1Mat = numpy.mat(bp1Mat).transpose()
+		print "Converted bp1Mat"
+
+		upBoolCol = numpy.array(numpy.sum(ap1 < bp1Mat,axis=1) *1. / timeFrame)
+		downBoolCol = numpy.array(numpy.sum(bp1 > ap1Mat,axis=1)*1. / timeFrame)
+
+		a_boolCol = (upBoolCol > downBoolCol) * (upBoolCol > .75)
+		b_boolCol = (upBoolCol < downBoolCol) * (downBoolCol > .75) * -1
+
+		return numpy.mat(a_boolCol + b_boolCol)
 
 	def parse(self):
+		
+		if os.path.isfile("xtrain_time15.csv") and os.path.isfile("ytrain_time15.csv") and self.useCachedFiles == True:
+			print "Using cached files"
+			xtrain_reader=csv.reader(open("xtrain_time15.csv","rb"),delimiter=',')
+			x_train=list(xtrain_reader)
+			x_train=numpy.mat(x_train).astype('float')
+
+			ytrain_reader=csv.reader(open("ytrain_time15.csv","rb"),delimiter=',')
+			y_train=list(ytrain_reader)
+			y_train=numpy.mat(y_train).astype('float')
+
+			print x_train.shape
+			print y_train.shape
+			return x_train,y_train			
+
+
 		messageRaw = file(self.messageFile).read()
 		lobRaw = file(self.lobFile).read()
 
@@ -231,7 +426,7 @@ class FeatureParser:
 		print "4"
 		matRaw = self.addSpreadAndMidPrice(matRaw)
 		print "5"
-		matRaw = self.addMaxMinPriceDifference(matRaw)
+		matRaw = self.addMaxMinPriceSpreadDifference(matRaw)
 		print "6"
 		matRaw = self.addMeanPriceVolume(matRaw)
 		print "7"
@@ -239,16 +434,37 @@ class FeatureParser:
 		print "8"
 		matRaw = self.addDerivatives(matRaw)
 		print "9"
+		matRaw = self.addRollingMin(matRaw)
+		print "10"
+		matRaw = self.addRollingMax(matRaw)
+		print "11"
+		matRaw = self.addRollingAverages(matRaw)
+		print "12"
+		matRaw = self.addRollingVariances(matRaw)
+		print "13"
+		matRaw = self.addRollingMedian(matRaw)
+		print "14"
+		matRaw = self.addRollingDerivatives(matRaw)
+
+		print "finalMat has nan %s" % numpy.isnan(matRaw).any()
 
 		self.finalMat = matRaw
 		numpy.savetxt("xtrain_time15.csv", self.finalMat, delimiter=",")
 
+		print "saved xtrain"
+
 		self.labelMat = self.label(matRaw)
+		print "labelMat has nan %s" % numpy.isnan(self.labelMat).any()
+
 		numpy.savetxt("ytrain_time15.csv", self.labelMat, delimiter=",")
+		print "saved ytrain"
+
+		print self.finalMat.shape
+		print self.labelMat.shape
 
 		return self.finalMat, self.labelMat
 
-#messageBook = "GOOG_2012-06-21_34200000_57600000_messagebook_5.csv"
+#messageBook = "GOOG_2012-06-21_34200000_57600000_message_5.csv"
 #limitBook = "GOOG_2012-06-21_34200000_57600000_orderbook_5.csv"
 
 #messageBook = "a.csv"

@@ -19,26 +19,6 @@ class Trainer:
 
 		return numpy.vstack((yesMat,noMat)), numpy.vstack((yesLabel,noLabel))
 
-	"""
-	def train(self,dataList):
-		neutralMat,upMat,downMat = dataList
-
-		neutralTrain,neutralLabels = self.getFinalMatAndLabels(neutralMat, numpy.vstack((upMat,downMat)))
-		neutralTree = tree.DecisionTreeClassifier()
-		neutralTree = neutralTree.fit(neutralTrain,neutralLabels)
-
-
-		upTrain,upLabels = self.getFinalMatAndLabels(upMat, numpy.vstack((neutralMat,downMat)))
-		upTree = tree.DecisionTreeClassifier()
-		upTree = upTree.fit(upTrain,upLabels)
-
-		downTrain,downLabels = self.getFinalMatAndLabels(downMat, numpy.vstack((neutralMat,upMat)))
-		downTree = tree.DecisionTreeClassifier()
-		downTree = downTree.fit(downTrain,downLabels)
-
-		return Model.Model(neutralTree,upTree,downTree)
-
-	"""
 	def getModel(self):
 		if self.modelType == "DecisionTree":
 			return DecisionTreeClassifier(max_depth=35, min_samples_split=1,random_state=0)#DecisionTreeClassifier(max_depth=35, min_samples_split=1,random_state=0)
@@ -61,6 +41,8 @@ class Trainer:
 	def train(self,dataList):
 		neutralMat,upMat,downMat = dataList
 
+
+		print "here"
 		neutralTrain,neutralLabels = self.getFinalMatAndLabels(neutralMat, numpy.vstack((upMat,downMat)))
 		neutralModel = self.getModel().fit(neutralTrain,neutralLabels)
 
